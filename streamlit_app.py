@@ -47,12 +47,12 @@ def main():
         # Try to get ML predictions
         try:
             # We need to format players_df to match what the ML engine expects for lag features
-            # For now, we'll just pass it and see if the engine can handle it or return it
             # In a real scenario, we'd need historical data for the current season to calculate lags
-            # For this demo, we'll skip the actual prediction call if model is not on Azure
-            # predictions = ml_engine.predict_next_gw(players_df)
-            # players_df = players_df.merge(predictions, on='name', how='left')
-            pass
+            # For this demo, we'll assume the engine handles it or returns the dataframe as is if it fails
+            predictions = ml_engine.predict_next_gw(players_df)
+            if 'predicted_points' in predictions.columns:
+                 players_df = players_df.merge(predictions, on='name', how='left')
+                 st.toast("🤖 AI Predictions Loaded from Azure!", icon="✅")
         except Exception as e:
             print(f"ML Prediction failed: {e}")
             
