@@ -3,7 +3,9 @@ import pandas as pd
 import numpy as np
 from collections import defaultdict
 from typing import Dict, List
-from models import EnhancedPlayerData 
+from models import EnhancedPlayerData
+from functools import lru_cache
+import time 
 
 class AdvancedFPLDataManager:
     """Enhanced data manager with advanced metrics and fixture analysis"""
@@ -53,11 +55,64 @@ class AdvancedFPLDataManager:
             print(f"Error fetching fixtures: {e}")
             return []
     
+    def calculate_team_form(self) -> Dict:
+        """Calculate team form based on last 5 matches (Attack & Defense)"""
+        if not self.fixtures_data:
+            return {}
+            
+        # Filter finished fixtures
+        finished_fixtures = [f for f in self.fixtures_data if f.get('finished')]
+        # Sort by event (most recent first)
+        finished_fixtures.sort(key=lambda x: x['event'] if x['event'] else 0, reverse=True)
+        
+        team_matches = defaultdict(list)
+        
+        # Get last 5 matches for each team
+        for f in finished_fixtures:
+            h = f['team_h']
+            a = f['team_a']
+            h_score = f['team_h_score']
+            a_score = f['team_a_score']
+            
+            if len(team_matches[h]) < 5:
+                team_matches[h].append({'scored': h_score, 'conceded': a_score})
+            if len(team_matches[a]) < 5:
+                team_matches[a].append({'scored': a_score, 'conceded': h_score})
+        
+        # Calculate strength metrics
+        team_form = {}
+        for team_id, matches in team_matches.items():
+            if not matches:
+                continue
+            
+            # Average goals scored (Attack Strength)
+            avg_scored = sum(m['scored'] for m in matches) / len(matches)
+            # Average goals conceded (Defensive Weakness)
+            avg_conceded = sum(m['conceded'] for m in matches) / len(matches)
+            
+            team_form[team_id] = {
+                'attack_strength': avg_scored,
+                'defensive_weakness': avg_conceded
+            }
+            
+        return team_form
+
     def calculate_fixture_difficulty(self):
-        """Calculate fixture difficulty ratings for next 5 gameweeks"""
+        """Calculate dynamic fixture difficulty ratings for next 5 gameweeks"""
         if not self.fixtures_data or not self.teams_data:
             return
         
+        # Get dynamic team form
+        team_form = self.calculate_team_form()
+        
+        # Calculate League Averages for normalization
+        if team_form:
+            avg_attack = np.mean([t['attack_strength'] for t in team_form.values()])
+            avg_defense = np.mean([t['defensive_weakness'] for t in team_form.values()])
+        else:
+            avg_attack = 1.5
+            avg_defense = 1.5
+
         # Initialize difficulty tracker
         team_difficulties = defaultdict(lambda: defaultdict(list))
         
@@ -70,12 +125,45 @@ class AdvancedFPLDataManager:
                     home_team = fixture['team_h']
                     away_team = fixture['team_a']
                     
-                    # FDR (Fixture Difficulty Rating) from API or calculate based on team strength
-                    home_difficulty = fixture.get('team_h_difficulty', 3)
-                    away_difficulty = fixture.get('team_a_difficulty', 3)
+                    # Dynamic FDR Calculation
+                    # Difficulty for Home Team = Away Team's Strength
+                    # Difficulty for Away Team = Home Team's Strength
                     
-                    team_difficulties[home_team][gw].append(away_difficulty)
-                    team_difficulties[away_team][gw].append(home_difficulty)
+                    if away_team in team_form:
+                        # Opponent Strength = (Attack + (Inverse of Defense Weakness? No, Low Conceded is Strong))
+                        # Actually, if I am Home, my difficulty depends on:
+                        # 1. Opponent Attack (Threat to my CS)
+                        # 2. Opponent Defense (Threat to my Goals)
+                        
+                        # Let's simplify: Strength = Attack + (3 - Conceded)
+                        # Higher is Stronger Team (Harder Fixture)
+                        opp_attack = team_form[away_team]['attack_strength']
+                        opp_defense_quality = 3.0 - team_form[away_team]['defensive_weakness'] # Assuming max 3 goals conceded avg
+                        opp_strength = (opp_attack + opp_defense_quality) / 2
+                        
+                        # Normalize to 1-5 scale roughly
+                        # Avg strength ~ (1.5 + 1.5)/2 = 1.5
+                        # Max strength ~ (3.0 + 3.0)/2 = 3.0
+                        # Min strength ~ (0.5 + 0.0)/2 = 0.25
+                        
+                        # Map 0.5 -> 3.0 to 2 -> 5
+                        home_difficulty = 2 + (opp_strength / 3.0) * 3
+                        home_difficulty = min(5, max(2, home_difficulty))
+                    else:
+                        home_difficulty = fixture.get('team_h_difficulty', 3)
+
+                    if home_team in team_form:
+                        opp_attack = team_form[home_team]['attack_strength']
+                        opp_defense_quality = 3.0 - team_form[home_team]['defensive_weakness']
+                        opp_strength = (opp_attack + opp_defense_quality) / 2
+                        
+                        away_difficulty = 2 + (opp_strength / 3.0) * 3
+                        away_difficulty = min(5, max(2, away_difficulty))
+                    else:
+                        away_difficulty = fixture.get('team_a_difficulty', 3)
+                    
+                    team_difficulties[home_team][gw].append(home_difficulty)
+                    team_difficulties[away_team][gw].append(away_difficulty)
         
         # Calculate average difficulties
         for team_id in team_difficulties:
