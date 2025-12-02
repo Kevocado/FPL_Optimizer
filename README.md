@@ -1,6 +1,7 @@
 # 🧠 Advanced FPL Optimizer
 
 A comprehensive Fantasy Premier League (FPL) optimization tool with advanced analytics, multiple optimization strategies, and transfer suggestions.
+PUBLIC LINK: [https://fploptimizer-76qdwha8usvji3ncz9kvat.streamlit.app/](url)
 
 ## 🚀 Features
 
