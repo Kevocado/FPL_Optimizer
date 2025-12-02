@@ -55,12 +55,24 @@ class FPLController:
                 optimal_comparisons[strategy] = optimal_result
         
         # Generate transfer suggestions
-        best_optimal = optimal_comparisons.get('balanced', {})
+        # Try 'balanced' first, then fallback to others
+        best_strategy = 'balanced'
+        if 'all_players' not in optimal_comparisons.get(best_strategy, {}):
+            # Find first successful strategy
+            for s in strategies:
+                if 'all_players' in optimal_comparisons.get(s, {}):
+                    best_strategy = s
+                    break
+        
+        best_optimal = optimal_comparisons.get(best_strategy, {})
         transfer_suggestions = {}
-        if 'all_players' in best_optimal:
+        
+        if 'all_players' in best_optimal and current_team:
             transfer_suggestions = self.optimizer.suggest_transfers(
                 current_team, best_optimal['all_players']
             )
+        elif not current_team:
+            print("Warning: Current team is empty. Check player data matching.")
         
         return {
             'team_info': team_info,

@@ -9,3 +9,4 @@ scikit-learn
 azure-storage-blob
 xgboost
 python-dotenv
+google-generativeai

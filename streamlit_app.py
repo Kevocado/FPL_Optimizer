@@ -59,97 +59,17 @@ def main():
         optimizer = AdvancedFPLOptimizer(players_df)
         controller = FPLController(dm, optimizer)
         
-    # --- Landing Page Metrics (The "Ticker") ---
-    st.subheader("🔥 Market Movers & Value Picks")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    # Top Form Players
-    top_form = players_df.nlargest(3, 'form')
-    with col1:
-        st.markdown("### 📈 Top Form")
-        for _, player in top_form.iterrows():
-            st.metric(
-                label=f"{player['name']} ({player['team']})",
-                value=f"{player['form']} pts",
-                delta=f"£{player['price']}m"
-            )
-            
-    # Top Value Picks (Points per Million)
-    top_value = players_df.nlargest(3, 'points_per_million')
-    with col2:
-        st.markdown("### 💰 Best Value")
-        for _, player in top_value.iterrows():
-            st.metric(
-                label=f"{player['name']} ({player['position']})",
-                value=f"{player['points_per_million']:.1f} PPM",
-                delta=f"{player['total_points']} pts"
-            )
-
-    # Dynamic Fixture Difficulty (Hardest/Easiest)
-    # We need to aggregate difficulty by team
-    team_difficulty = []
-    for team_id, data in dm.fixture_difficulty.items():
-        team_difficulty.append({
-            'team': data['team_name'],
-            'difficulty': data['average_difficulty']
-        })
-    difficulty_df = pd.DataFrame(team_difficulty)
-    
-    with col3:
-        st.markdown("### 🗓️ Fixture Watch")
-        easiest = difficulty_df.nsmallest(1, 'difficulty').iloc[0]
-        hardest = difficulty_df.nlargest(1, 'difficulty').iloc[0]
-        
-        st.info(f"🟢 **Easiest Run:** {easiest['team']} (Avg Diff: {easiest['difficulty']:.2f})")
-        st.error(f"🔴 **Hardest Run:** {hardest['team']} (Avg Diff: {hardest['difficulty']:.2f})")
-
-    st.divider()
-
-    # --- Visuals (Scatter Plot) ---
-    st.subheader("📊 Player Performance Analysis")
-    
-    # Filters for Scatter Plot
-    col_filter1, col_filter2 = st.columns(2)
-    with col_filter1:
-        pos_filter = st.multiselect(
-            "Filter by Position",
-            options=players_df['position'].unique(),
-            default=players_df['position'].unique()
-        )
-    with col_filter2:
-        price_range = st.slider(
-            "Price Range (£m)",
-            min_value=float(players_df['price'].min()),
-            max_value=float(players_df['price'].max()),
-            value=(4.0, 15.0)
-        )
-        
-    filtered_df = players_df[
-        (players_df['position'].isin(pos_filter)) &
-        (players_df['price'] >= price_range[0]) &
-        (players_df['price'] <= price_range[1])
-    ]
-    
-    fig = px.scatter(
-        filtered_df,
-        x="price",
-        y="total_points",
-        color="position",
-        hover_name="name",
-        hover_data=["team", "form", "selected_by_percent"],
-        title="Price vs Total Points (Value Identification)",
-        labels={"price": "Price (£m)", "total_points": "Total Points"},
-        template="plotly_dark",
-        size="selected_by_percent",
-        size_max=15
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    st.divider()
-    
     # --- Sidebar & Optimization ---
     st.sidebar.header("🛠️ Team Optimization")
+    
+    # AI API Key (Backend)
+    from dotenv import load_dotenv
+    import os
+    load_dotenv()
+    
+    api_key = os.getenv("FPL_API_KEY")
+    if not api_key:
+        st.sidebar.warning("⚠️ FPL_API_KEY not found in .env")
     
     team_input = st.sidebar.text_input("Enter FPL Team ID or URL", placeholder="e.g. 123456")
     
@@ -170,18 +90,166 @@ def main():
     
     run_btn = st.sidebar.button("🚀 Optimize Team", type="primary")
     
-    if run_btn and team_input:
-        team_id = extract_team_id_from_url(team_input)
-        if not team_id:
-            st.sidebar.error("Invalid Team ID or URL")
-        else:
-            with st.spinner("Analyzing Team & Calculating Optimal Transfers..."):
-                result = controller.analyze_user_team(team_id)
+    # --- Main Layout (Split View) ---
+    # Create two columns: Main Dashboard (Left) and AI Analyst (Right)
+    main_col, ai_col = st.columns([0.65, 0.35], gap="medium")
+    
+    with main_col:
+        # --- Landing Page Metrics (The "Ticker") ---
+        st.subheader("🔥 Market Movers & Value Picks")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        # Top Form Players
+        top_form = players_df.nlargest(3, 'form')
+        with col1:
+            st.markdown("### 📈 Top Form")
+            for _, player in top_form.iterrows():
+                st.metric(
+                    label=f"{player['name']} ({player['team']})",
+                    value=f"{player['form']} pts",
+                    delta=f"£{player['price']}m"
+                )
                 
-                if "error" in result:
-                    st.error(result['error'])
-                else:
-                    display_results(result, strategy)
+        # Top Value Picks (Points per Million)
+        top_value = players_df.nlargest(3, 'points_per_million')
+        with col2:
+            st.markdown("### 💰 Best Value")
+            for _, player in top_value.iterrows():
+                st.metric(
+                    label=f"{player['name']} ({player['position']})",
+                    value=f"{player['points_per_million']:.1f} PPM",
+                    delta=f"{player['total_points']} pts"
+                )
+
+        # Dynamic Fixture Difficulty (Hardest/Easiest)
+        # We need to aggregate difficulty by team
+        team_difficulty = []
+        for team_id, data in dm.fixture_difficulty.items():
+            team_difficulty.append({
+                'team': data['team_name'],
+                'difficulty': data['average_difficulty']
+            })
+        difficulty_df = pd.DataFrame(team_difficulty)
+        
+        with col3:
+            st.markdown("### 🗓️ Fixture Watch")
+            easiest = difficulty_df.nsmallest(1, 'difficulty').iloc[0]
+            hardest = difficulty_df.nlargest(1, 'difficulty').iloc[0]
+            
+            st.info(f"🟢 **Easiest Run:** {easiest['team']} (Avg Diff: {easiest['difficulty']:.2f})")
+            st.error(f"🔴 **Hardest Run:** {hardest['team']} (Avg Diff: {hardest['difficulty']:.2f})")
+
+        st.divider()
+
+        # --- Visuals (Scatter Plot) ---
+        st.subheader("📊 Player Performance Analysis")
+        
+        # Filters for Scatter Plot
+        col_filter1, col_filter2 = st.columns(2)
+        with col_filter1:
+            pos_filter = st.multiselect(
+                "Filter by Position",
+                options=players_df['position'].unique(),
+                default=players_df['position'].unique()
+            )
+        with col_filter2:
+            price_range = st.slider(
+                "Price Range (£m)",
+                min_value=float(players_df['price'].min()),
+                max_value=float(players_df['price'].max()),
+                value=(4.0, 15.0)
+            )
+            
+        filtered_df = players_df[
+            (players_df['position'].isin(pos_filter)) &
+            (players_df['price'] >= price_range[0]) &
+            (players_df['price'] <= price_range[1])
+        ]
+        
+        fig = px.scatter(
+            filtered_df,
+            x="price",
+            y="total_points",
+            color="position",
+            hover_name="name",
+            hover_data=["team", "form", "selected_by_percent"],
+            title="Price vs Total Points (Value Identification)",
+            labels={"price": "Price (£m)", "total_points": "Total Points"},
+            template="plotly_dark",
+            size="selected_by_percent",
+            size_max=15
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        if run_btn and team_input:
+            team_id = extract_team_id_from_url(team_input)
+            if not team_id:
+                st.sidebar.error("Invalid Team ID or URL")
+            else:
+                with st.spinner("Analyzing Team & Calculating Optimal Transfers..."):
+                    result = controller.analyze_user_team(team_id)
+                    
+                    if "error" in result:
+                        st.error(result['error'])
+                    else:
+                        display_results(result, strategy)
+                        # Store result in session state for AI context
+                        st.session_state['user_team_data'] = result
+
+    with ai_col:
+        st.markdown("### 🤖 AI Analyst")
+        st.caption("Your personal FPL assistant")
+        
+        # Import here to avoid circular imports or load issues
+        from ai_utils import FPLAIContextManager, get_ai_response
+        
+        # Container for chat history to keep it scrollable/contained
+        chat_container = st.container(height=600)
+        
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+
+        # Display chat messages
+        with chat_container:
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+        # Quick Prompts (Compact)
+        st.markdown("###### Quick Actions")
+        col_q1, col_q2 = st.columns(2)
+        prompt = None
+        if col_q1.button("📊 Rate Team", use_container_width=True):
+            prompt = "Rate my current team based on form and fixtures."
+        if col_q2.button("🔄 Transfers", use_container_width=True):
+            prompt = "Who should I transfer out and who should I bring in?"
+
+        # Chat Input
+        if user_input := st.chat_input("Ask about players, fixtures...") or prompt:
+            # If it was a button click, use that prompt
+            if prompt and not user_input:
+                user_input = prompt
+                
+            # Add user message to chat history
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            with chat_container:
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+
+            # Generate AI response
+            with chat_container:
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking..."):
+                        # Get context
+                        user_team_data = st.session_state.get('user_team_data', {})
+                        context_manager = FPLAIContextManager(players_df, user_team_data)
+                        
+                        response = get_ai_response(st.session_state.messages, api_key, context_manager)
+                        st.markdown(response)
+                    
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": response})
 
 def display_results(result, strategy):
     st.header(f"🏆 Optimization Results ({strategy.title()} Strategy)")
